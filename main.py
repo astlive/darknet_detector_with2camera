@@ -55,5 +55,20 @@ def cap_select():
         print("Camera Right Not Available")
     return cam_left_num, cam_right_num
 
+def demo_cap():
+    print("Try load from left.mp4 and right.mp4")
+
+
 if __name__ == '__main__':
-    cam_left_num, cam_right_num = cap_select()
+    demo = True
+    cap_left, cap_right
+    if(demo is not True):
+        cam_left_num, cam_right_num = cap_select()
+        cap_left = cv2.VideoCapture(cam_left_num)
+        cap_right = cv2.VideoCapture(cam_right_num)
+    else:
+        cap_left = cv2.VideoCapture("./demo/left.mp4")
+        cap_right = cv2.VideoCapture("./demo/right.mp4")
+    set_res(cap_left, 1920, 1080)
+    set_res(cap_right, 1920, 1080)
+    
