@@ -58,7 +58,6 @@ def cap_select():
 def demo_cap():
     print("Try load from left.mp4 and right.mp4")
 
-
 if __name__ == '__main__':
     demo = True
     cap_left, cap_right
