@@ -4,6 +4,15 @@ import darknet
 import numpy as np
 from skimage import io, draw
 from skimage.util import img_as_float
+import multiprocessing as mp
+import time
+
+###config###
+thresh = 0.5
+configPath = "./cfgs/yolov3_hr_c13.cfg"
+weightPath = "./cfgs/yolov3_hr_c13_best.weights"
+metaPath = "./cfgs/obj.data"
+###config-end###
 
 def set_res(cap, x,y):
     cap.set(cv2.CAP_PROP_FRAME_WIDTH, int(x))
@@ -56,57 +65,9 @@ def cap_select():
         print("Camera Right Not Available")
     return cam_left_num, cam_right_num
 
-def draw_boxes(img, detections):
-    print("*** "+str(len(detections))+" Results, color coded by confidence ***")
-    imcaption = []
-    for detection in detections:
-        label = detection[0]
-        confidence = detection[1]
-        pstring = label+": "+str(np.rint(100 * confidence))+"%"
-        imcaption.append(pstring)
-        print(pstring)
-        bounds = detection[2]
-        shape = img.shape
-        # x = shape[1]
-        # xExtent = int(x * bounds[2] / 100)
-        # y = shape[0]
-        # yExtent = int(y * bounds[3] / 100)
-        yExtent = int(bounds[3])
-        xEntent = int(bounds[2])
-        # Coordinates are around the center
-        xCoord = int(bounds[0] - bounds[2]/2)
-        yCoord = int(bounds[1] - bounds[3]/2)
-        boundingBox = [
-            [xCoord, yCoord],
-            [xCoord, yCoord + yExtent],
-            [xCoord + xEntent, yCoord + yExtent],
-            [xCoord + xEntent, yCoord]
-        ]
-        # Wiggle it around to make a 3px border
-        rr, cc = draw.polygon_perimeter([x[1] for x in boundingBox], [x[0] for x in boundingBox], shape= shape)
-        rr2, cc2 = draw.polygon_perimeter([x[1] + 1 for x in boundingBox], [x[0] for x in boundingBox], shape= shape)
-        rr3, cc3 = draw.polygon_perimeter([x[1] - 1 for x in boundingBox], [x[0] for x in boundingBox], shape= shape)
-        rr4, cc4 = draw.polygon_perimeter([x[1] for x in boundingBox], [x[0] + 1 for x in boundingBox], shape= shape)
-        rr5, cc5 = draw.polygon_perimeter([x[1] for x in boundingBox], [x[0] - 1 for x in boundingBox], shape= shape)
-        boxColor = (int(255 * (1 - (confidence ** 2))), int(255 * (confidence ** 2)), 0)
-        draw.set_color(img, (rr, cc), boxColor, alpha= 0.8)
-        draw.set_color(img, (rr2, cc2), boxColor, alpha= 0.8)
-        draw.set_color(img, (rr3, cc3), boxColor, alpha= 0.8)
-        draw.set_color(img, (rr4, cc4), boxColor, alpha= 0.8)
-        draw.set_color(img, (rr5, cc5), boxColor, alpha= 0.8)
-    detections = {
-        "detections": detections,
-        "image": img,
-        "caption": "\n<br/>".join(imcaption)
-    }
-    return detections
-
-def bgr2rgb_resized(img):
+def bgr2rgb_resized(img , network_width, network_height):
     frame_rgb = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
-    frame_resized = cv2.resize(frame_rgb,
-                                (darknet.network_width(darknet.netMain),
-                                darknet.network_height(darknet.netMain)),
-                                interpolation=cv2.INTER_LINEAR)
+    frame_resized = cv2.resize(frame_rgb, (network_width, network_height), interpolation=cv2.INTER_LINEAR)
     return frame_resized
 
 def convertBack(x, y, w, h):
@@ -117,7 +78,14 @@ def convertBack(x, y, w, h):
     return xmin, ymin, xmax, ymax
 
 def cvDrawBoxes(detections, img):
+    red = (255, 0, 0)
+    green = (0, 255, 0)
+    color = (0, 0, 0)
     for detection in detections:
+        if("break" in detection[0]):
+            color = red
+        else:
+            color = green
         x, y, w, h = detection[2][0],\
             detection[2][1],\
             detection[2][2],\
@@ -131,23 +99,36 @@ def cvDrawBoxes(detections, img):
                     detection[0] +
                     " [" + str(round(detection[1] * 100, 2)) + "]",
                     (pt1[0], pt1[1] - 5), cv2.FONT_HERSHEY_SIMPLEX, 0.5,
-                    [0, 255, 0], 2)
+                    color, 2)
     return img
 
-def do_detect(cap1, cap2):
-    #config
-    thresh = 0.5
-    configPath = "./cfgs/yolov3_hr_c13.cfg"
-    weightPath = "./cfgs/yolov3_hr_c13_best.weights"
-    metaPath= "./cfgs/obj.data"
-    destroyWindowCount = 0
+def cap_worker(cap_num, q, network_width, network_height, cap_diff, cap_speed):
+    print("cap_worker START at cap:" + str(cap_num))
+    count = 0
+    cap = None
+    #ifdemo
+    if(isinstance(cap_num, str)):
+        cap = cv2.VideoCapture(cap_num)
+    else:
+        cap = cv2.VideoCapture(cap_num, cv2.CAP_DSHOW)
+    while(cap.isOpened()):
+        ret, img = cap.read()
+        if(ret):
+            cv2.waitKey(round(cap_speed.value*cap_diff.value*1000))
+            q.put(bgr2rgb_resized(img, network_width, network_height))
 
+
+def do_detect(cap1_num, cap2_num):
     #load net
     darknet.performDetect(thresh=thresh, configPath=configPath, weightPath=weightPath, metaPath=metaPath, initOnly=True)
+    network_width = darknet.network_width(darknet.netMain)
+    network_height = darknet.network_height(darknet.netMain)
+    print("network_width:" + str(network_width))
+    print("network_height:" + str(network_height))
 
     #init windows
     cv2.namedWindow('Capture', cv2.WINDOW_NORMAL)
-    cv2.resizeWindow('Capture', 1920, 1080)
+    cv2.resizeWindow('Capture', network_width*2, network_height)
 
     #load a no_signal image
     no_signal_img = cv2.imread("./demo/no_signal.png")
@@ -155,63 +136,76 @@ def do_detect(cap1, cap2):
     #Create an image we reuse for each detect
     darknet_image = darknet.make_image(darknet.network_width(darknet.netMain), darknet.network_height(darknet.netMain),3)
 
-    while (cap1.isOpened() or cap2.isOpened()):
-        ret1, img1 = cap1.read()
-        ret2, img2 = cap2.read()
-        if not ret1:
-            img1 = no_signal_img
-        if not ret2:
-            img2 = no_signal_img
+    #init Queue and timediff
+    imgq1 = mp.Queue()
+    imgq2 = mp.Queue()
+    cap_diff = mp.Value('d', 0.0)
+    cap_speed = mp.Value('d', 1.5)
 
-        if (not ret1) and (not ret2):
-            print("Both 2 Capture no signal..." + str(destroyWindowCount))
-            destroyWindowCount = destroyWindowCount + 1
-            if (destroyWindowCount == 60):
-                cv2.destroyWindow('Capture')
-                cv2.namedWindow('Capture', cv2.WINDOW_NORMAL)
-                cv2.resizeWindow('Capture', 1920, 1080)
-                destroyWindowCount = 0
-                print("Reset window")
-        else:
-            destroyWindowCount = 0
+    #init cap_worker
+    w1 = mp.Process(target=cap_worker,args=(cap1_num,imgq1,network_width,network_height,cap_diff,cap_speed,))
+    w2 = mp.Process(target=cap_worker,args=(cap2_num,imgq2,network_width,network_height,cap_diff,cap_speed,))
+    w1.start()
+    w2.start()
 
-            img1_resized = bgr2rgb_resized(img1)
-            darknet.copy_image_from_bytes(darknet_image, img1_resized.tobytes())
+    img1 = no_signal_img
+    img2 = no_signal_img
+    cv2.imshow("Capture", np.hstack((img1, img2)))
+
+    while (True):
+        FPS_count_start_time = time.time()
+        Count_FPS = False
+        if(imgq1.qsize() > 0 or imgq2.qsize() > 0):
+            Count_FPS = True
+
+        if(imgq1.qsize() > 0):
+            detect_time_start = time.time()
+            img1 = imgq1.get()
+            darknet.copy_image_from_bytes(darknet_image, img1.tobytes())
             res1 = darknet.detect_image(net = darknet.netMain, meta = darknet.metaMain, im = darknet_image)
-            img1 = cvDrawBoxes(res1, img1_resized)
+            img1 = cvDrawBoxes(res1, img1)
             img1 = cv2.cvtColor(img1, cv2.COLOR_BGR2RGB)
+            cap_diff.value = round((time.time() - detect_time_start), 3)
+            print("detect_time:" + str(cap_diff.value))
 
-            img2_resized = bgr2rgb_resized(img2)
-            darknet.copy_image_from_bytes(darknet_image, img2_resized.tobytes())
+        if(imgq2.qsize() > 0):
+            img2 = imgq2.get()
+            darknet.copy_image_from_bytes(darknet_image, img2.tobytes())
             res2 = darknet.detect_image(net = darknet.netMain, meta = darknet.metaMain, im = darknet_image)
-            img2 = cvDrawBoxes(res2, img2_resized)
+            img2 = cvDrawBoxes(res2, img2)
             img2 = cv2.cvtColor(img2, cv2.COLOR_BGR2RGB)
-
-            img1 = cv2.resize(img1, dsize=(960,540))
-            img2 = cv2.resize(img2, dsize=(960,540))
         
-        cv2.imshow('Capture', np.hstack((img1, img2)))
+        img1 = cv2.resize(img1, dsize=(960,540))
+        img2 = cv2.resize(img2, dsize=(960,540))
+        
+        if(Count_FPS):
+            cv2.imshow("Capture", np.hstack((img1, img2)))
+            print("FPS:" + str(round(60 / (time.time()-FPS_count_start_time), 1)))
+            if(imgq1.qsize() > 2 or imgq2.qsize() > 2):
+                cap_speed.value = cap_speed.value + 0.001
+                print("decrease cap_speed:" + str(round(cap_speed.value, 3)))
+        else:
+            if(cap_speed.value > 0.001):
+                cap_speed.value = cap_speed.value - 0.001
+                print("increase cap_speed:" + str(round(cap_speed.value, 3)))
+        print("imgq1.qsize():" + str(imgq1.qsize()) + " imgq2.qsize():" + str(imgq2.qsize()))
         key = cv2.waitKey(1)
         if(key == ord('q')):
             break
         elif(key == ord('p')):
             key = cv2.waitKey(0)
-    cap1.release()
-    cap2.release()
+    w1.terminate()
+    w2.terminate()
 
 if __name__ == '__main__':
     #demo mode switch
     demo = True
-    cap_left = None
-    cap_right = None
+    cam_left_num = None
+    cam_right_num = None
     if(demo is not True):
         cam_left_num, cam_right_num = cap_select()
-        cap_left = cv2.VideoCapture(cam_left_num)
-        cap_right = cv2.VideoCapture(cam_right_num)
     else:
-        cap_left = cv2.VideoCapture("./demo/left.mp4")
-        cap_right = cv2.VideoCapture("./demo/right.mp4")
-    set_res(cap_left, 1280, 720)
-    set_res(cap_right, 1280, 720)
+        cam_left_num = "./demo/left.mp4"
+        cam_right_num = "./demo/right.mp4"
     
-    do_detect(cap_left, cap_right)
+    do_detect(cam_left_num, cam_right_num)
