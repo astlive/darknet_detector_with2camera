@@ -2,8 +2,6 @@ import tkinter as tk
 import cv2
 import darknet
 import numpy as np
-from skimage import io, draw
-from skimage.util import img_as_float
 import multiprocessing as mp
 import time
 
@@ -12,6 +10,7 @@ thresh = 0.5
 configPath = "./cfgs/yolov3_hr_c13.cfg"
 weightPath = "./cfgs/yolov3_hr_c13_best.weights"
 metaPath = "./cfgs/obj.data"
+fps_skip = 1
 ###config-end###
 
 def set_res(cap, x,y):
@@ -114,17 +113,14 @@ def cap_worker(cap_num, q, network_width, network_height, cap_diff, cap_speed):
     while(cap.isOpened()):
         ret, img = cap.read()
         if(ret):
-            cv2.waitKey(round(cap_speed.value*cap_diff.value*1000))
             q.put(bgr2rgb_resized(img, network_width, network_height))
-
+            cv2.waitKey(round(cap_speed.value*cap_diff.value*1000))
 
 def do_detect(cap1_num, cap2_num):
     #load net
     darknet.performDetect(thresh=thresh, configPath=configPath, weightPath=weightPath, metaPath=metaPath, initOnly=True)
     network_width = darknet.network_width(darknet.netMain)
     network_height = darknet.network_height(darknet.netMain)
-    print("network_width:" + str(network_width))
-    print("network_height:" + str(network_height))
 
     #init windows
     cv2.namedWindow('Capture', cv2.WINDOW_NORMAL)
@@ -143,6 +139,7 @@ def do_detect(cap1_num, cap2_num):
     cap_speed = mp.Value('d', 1.5)
 
     #init cap_worker
+    print("network_height:" + str(network_height) + " network_width:" + str(network_width))
     w1 = mp.Process(target=cap_worker,args=(cap1_num,imgq1,network_width,network_height,cap_diff,cap_speed,))
     w2 = mp.Process(target=cap_worker,args=(cap2_num,imgq2,network_width,network_height,cap_diff,cap_speed,))
     w1.start()
@@ -180,7 +177,7 @@ def do_detect(cap1_num, cap2_num):
         
         if(Count_FPS):
             cv2.imshow("Capture", np.hstack((img1, img2)))
-            print("FPS:" + str(round(60 / (time.time()-FPS_count_start_time), 1)))
+            print("FPS:" + str(round(1 / (time.time()-FPS_count_start_time), 1)))
             if(imgq1.qsize() > 2 or imgq2.qsize() > 2):
                 cap_speed.value = cap_speed.value + 0.001
                 print("decrease cap_speed:" + str(round(cap_speed.value, 3)))

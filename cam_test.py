@@ -1,4 +1,6 @@
 import cv2
+import time
+import os
 
 def set_res(cap, x,y):
     cap.set(cv2.CAP_PROP_FRAME_WIDTH, int(x))
