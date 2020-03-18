@@ -1,4 +1,3 @@
-import tkinter as tk
 import cv2
 import darknet
 import numpy as np
