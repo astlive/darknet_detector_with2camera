@@ -82,7 +82,7 @@ hasGPU = True
 if os.name == "nt":
     cwd = os.path.join(os.path.dirname(__file__), "dlls")
     os.environ['PATH'] = cwd + ";" + os.environ['PATH']
-    winGPUdll = os.path.join(cwd, "yolo_cpp_dll.dll")
+    winGPUdll = os.path.join(cwd, "dark.dll")
     winNoGPUdll = os.path.join(cwd, "yolo_cpp_dll_nogpu.dll")
     envKeys = list()
     for k, v in os.environ.items():
