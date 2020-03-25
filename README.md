@@ -1,6 +1,6 @@
 # some-darknet-shit-mini
 Here we go again
 
-You should compile yourself dlls and make sure Path correct.
+You should make yourown dlls and modify the setting.
 
 凸*_*凸
