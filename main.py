@@ -114,7 +114,9 @@ def cap_worker(cap_num, q, network_width, network_height, cap_diff, cap_speed):
     if(isinstance(cap_num, str)):
         cap = cv2.VideoCapture(cap_num)
     else:
-        cap = cv2.VideoCapture(cap_num, cv2.CAP_DSHOW)
+        cap = cv2.VideoCapture(cap_num)
+        set_res(cap, 1280,720)
+        cap.set(cv2.CAP_PROP_FPS, 60)
     while(cap.isOpened()):
         pre_time = time.time()
         ret, img = cap.read()
@@ -209,7 +211,7 @@ if __name__ == '__main__':
     if(demo is not True):
         cam_left_num, cam_right_num = cap_select()
     else:
-        cam_left_num = "./demo/left.mp4"
-        cam_right_num = "./demo/right.mp4"
+        cam_left_num = "./demo/gopro8(1).MP4"
+        cam_right_num = "./demo/gopro8(2).MP4"
     
     do_detect(cam_left_num, cam_right_num)

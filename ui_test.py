@@ -2,13 +2,13 @@ import darknet
 import numpy as np
 import multiprocessing as mp
 import time
+import os
 
 ###config###
 thresh = 0.5
-configPath = "./cfgs/yolov3_hr_c13.cfg"
-# configPath = "./cfgs/csresnext50-panet-spp-original-optimal.cfg"
-weightPath = "./cfgs/yolov3_hr_c13_best.weights"
-metaPath = "./cfgs/obj.data"
+configPath = "./cfgs/model_1/csresnext50-panet-spp-original-optimal.cfg"
+weightPath = "./cfgs/model_1/csresnext50-panet-spp-original-optimal_best.weights"
+metaPath = "./cfgs/model_1/obj.data"
 fps_skip = 1
 ###config-end###
 
@@ -24,7 +24,7 @@ def cam_check(cam):
     frame_count = 0
     if(cap is None or not cap.isOpened()):
         return False
-    size = set_res(cap, 640,480)
+    size = set_res(cap, 1280,720)
     key = ''
     print("Camera:" + str(cam) + " Size:" + str(size))
     while(True):
@@ -81,14 +81,14 @@ def convertBack(x, y, w, h):
 
 def cvDrawBoxes(detections, img):
     import cv2
-    red = (255, 0, 0)
+    red = (0, 0, 255)
     green = (0, 255, 0)
     color = (0, 0, 0)
+    min_y = round(img.shape[0] * 0.1, 0)
+    max_y = round(img.shape[0] * 0.9, 0)
+    send_dialog = False
+    msg = ""
     for detection in detections:
-        if("break" in detection[0]):
-            color = red
-        else:
-            color = green
         x, y, w, h = detection[2][0],\
             detection[2][1],\
             detection[2][2],\
@@ -97,13 +97,63 @@ def cvDrawBoxes(detections, img):
             float(x), float(y), float(w), float(h))
         pt1 = (xmin, ymin)
         pt2 = (xmax, ymax)
+        if("break" in detection[0] and ymin > min_y and ymax < max_y):
+            color = red
+            send_dialog = True
+            msg = "brk"
+        else:
+            color = green
+        
         cv2.rectangle(img, pt1, pt2, (0, 255, 0), 1)
         cv2.putText(img,
                     detection[0] +
                     " [" + str(round(detection[1] * 100, 2)) + "]",
                     (pt1[0], pt1[1] - 5), cv2.FONT_HERSHEY_SIMPLEX, 0.5,
                     color, 2)
-    return img
+    return msg, img
+
+def show_dialog(q):
+    import cv2
+    # rr = {'msg':msg, 'src':str(cap1_num), 'img':img1}
+    cfm_list = list()
+    first_run = True
+    index = 0
+    while(True):
+        if(q.qsize() > 0):
+            # cfm_list.append(q.get())
+            rr = q.get()
+            time_str = time.strftime("%Y-%m-%d %H%M%S", time.localtime())
+            cv2.putText(rr['img'], time_str, (10,40), cv2.FONT_HERSHEY_SIMPLEX, 1.2, (0,255,0), 2)
+            cv2.imshow("list", rr['img'])
+            key = cv2.waitKey(0)
+            if(key == ord('Y') or key == ord('y')):
+                path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "saves", time_str + ".jpg")
+                if(os.path.isfile(path)):
+                    for i in range(100):
+                        path = os.path.splitext(path)[0] + "-" + str(i) + ".jpg"
+                        if(not os.path.isfile(path)):
+                            break
+                cv2.imwrite(path, rr['o_img'])
+            elif(key == ord('N') or key == ord('n')):
+                print("N")
+
+    #     if(len(cfm_list) > 0):
+    #         img = cfm_list[0]['img']
+    #         cv2.putText(img, "如果確認，按Y，否則N", (10,20),cv2.FONT_HERSHEY_COMPLEX,12,(0,0,255),5)
+    #         cv2.imshow("list", cfm_list[0]['img'])
+    # time_str = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime())
+
+    
+    # tit_str = str(cam_num) + "Capture Break "
+    # if(msg == "brk"):
+    #     cv2.putText(frame, "如果確認，按Y，否則N", (10,20),cv2.FONT_HERSHEY_COMPLEX,12,(0,0,255),5)
+    #     cv2.imshow(tit_str, frame)
+    #     key = cv2.waitKey(0)
+    #     if(key == ord('Y') or key == ord('y')):
+    #         print("Y")
+    #     elif(key == ord('N') or key == ord('n')):
+    #         print("N")
+    return 0
 
 def cap_worker(cap_num, q, network_width, network_height, cap_diff, cap_speed):
     import cv2
@@ -114,13 +164,17 @@ def cap_worker(cap_num, q, network_width, network_height, cap_diff, cap_speed):
     if(isinstance(cap_num, str)):
         cap = cv2.VideoCapture(cap_num)
     else:
-        cap = cv2.VideoCapture(cap_num, cv2.CAP_DSHOW)
+        cap = cv2.VideoCapture(cap_num)
+        set_res(cap, 1280,720)
+        cap.set(cv2.CAP_PROP_FPS, 60)
     while(cap.isOpened()):
         pre_time = time.time()
         ret, img = cap.read()
         if(ret):
+            cvt_time = time.time()
             q.put(bgr2rgb_resized(img, network_width, network_height))
             print("camera time taken:" + str(round(time.time() - pre_time, 2)) + "s")
+            print("cvt time taken:" + str(round(time.time() - cvt_time, 2)) + "s")
             cv2.waitKey(round(cap_speed.value*cap_diff.value*1000))
 
 def do_detect(cap1_num, cap2_num):
@@ -134,6 +188,7 @@ def do_detect(cap1_num, cap2_num):
     #init Queue and timediff
     imgq1 = mp.Manager().Queue()
     imgq2 = mp.Manager().Queue()
+    imgqb = mp.Manager().Queue()
     cap_diff = mp.Value('d', 0.0)
     cap_speed = mp.Value('d', 1.5)
 
@@ -141,8 +196,10 @@ def do_detect(cap1_num, cap2_num):
     print("network_height:" + str(network_height) + " network_width:" + str(network_width))
     w1 = mp.Process(target=cap_worker,args=(cap1_num,imgq1,network_width,network_height,cap_diff,cap_speed,))
     w2 = mp.Process(target=cap_worker,args=(cap2_num,imgq2,network_width,network_height,cap_diff,cap_speed,))
+    w3 = mp.Process(target=show_dialog,args=(imgqb,))
     w1.start()
     w2.start()
+    w3.start()
 
     #init windows
     import cv2
@@ -165,8 +222,12 @@ def do_detect(cap1_num, cap2_num):
             img1 = imgq1.get()
             darknet.copy_image_from_bytes(darknet_image, img1.tobytes())
             res1 = darknet.detect_image(net = darknet.netMain, meta = darknet.metaMain, im = darknet_image)
-            img1 = cvDrawBoxes(res1, img1)
             img1 = cv2.cvtColor(img1, cv2.COLOR_BGR2RGB)
+            o_img = img1.copy()
+            msg, img1 = cvDrawBoxes(res1, img1)
+            if(msg != ""):
+                rr = {'msg':msg, 'src':str(cap1_num), 'img':img1, 'o_img':o_img}
+                imgqb.put(rr)
             cap_diff.value = round((time.time() - detect_time_start), 3)
             print("detect_time:" + str(cap_diff.value))
 
@@ -174,8 +235,12 @@ def do_detect(cap1_num, cap2_num):
             img2 = imgq2.get()
             darknet.copy_image_from_bytes(darknet_image, img2.tobytes())
             res2 = darknet.detect_image(net = darknet.netMain, meta = darknet.metaMain, im = darknet_image)
-            img2 = cvDrawBoxes(res2, img2)
             img2 = cv2.cvtColor(img2, cv2.COLOR_BGR2RGB)
+            o_img = img2.copy()
+            msg, img2 = cvDrawBoxes(res2, img2)
+            if(msg != ""):
+                rr = {'msg':msg, 'src':str(cap2_num), 'img':img2, 'o_img':o_img}
+                imgqb.put(rr)
         
         if(Count_FPS):
             dis_rr_time = time.time()
@@ -200,6 +265,7 @@ def do_detect(cap1_num, cap2_num):
             key = cv2.waitKey(0)
     w1.terminate()
     w2.terminate()
+    w3.terminate()
 
 if __name__ == '__main__':
     #demo mode switch
@@ -209,7 +275,7 @@ if __name__ == '__main__':
     if(demo is not True):
         cam_left_num, cam_right_num = cap_select()
     else:
-        cam_left_num = "./demo/left.mp4"
-        cam_right_num = "./demo/right.mp4"
+        cam_left_num = "./demo/gopro8(1).MP4"
+        cam_right_num = "./demo/gopro8(2).MP4"
     
     do_detect(cam_left_num, cam_right_num)

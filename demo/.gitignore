@@ -1,6 +1,6 @@
 # This dir for demo Videos
 # Put right.mp4 and left.mp4 here
 # Run the demo need a static yolov3.weights from https://pjreddie.com/media/files/yolov3.weights
-left.mp4
-right.mp4
+*.mp4
+*.jpg
 yolov3.weights
