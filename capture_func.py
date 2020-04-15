@@ -2,12 +2,23 @@ import os
 import cv2
 import time
 import numpy as np
-import imutils
 
 def cv_size(img):
     return tuple(img.shape[1::-1])
 
-def init_cap(cap_index, width, height, fps):
+def convertBack(x, y, w, h):
+    xmin = int(round(x - (w / 2)))
+    xmax = int(round(x + (w / 2)))
+    ymin = int(round(y - (h / 2)))
+    ymax = int(round(y + (h / 2)))
+    return xmin, ymin, xmax, ymax
+
+def init_cap(cap_index, width, height, fps, debug = True):
+    if(debug):print("init_cap args-->cap_index:" + str(cap_index) + " width:" + str(width) + " height:"
+                + str(height) + " fps:" + str(fps))
+    if(not isinstance(width, int)):width = width.value
+    if(not isinstance(height, int)):height = height.value
+    if(not isinstance(fps, int)):fps = fps.value
     cap = None
     cap = cv2.VideoCapture(cap_index)
     cap.set(cv2.CAP_PROP_FRAME_WIDTH, width)
@@ -35,16 +46,22 @@ def sel_cap(skip = -1):
         cv2.destroyAllWindows()
     return None
 
-def mp_cap_worker(cap_ind, width, height, fps, q):
+def mp_cap_worker(cap_ind, width, height, fps, q, mode="bgr"):
     import cv2
+    if(not isinstance(width, int)):width = width.value
+    if(not isinstance(height, int)):height = height.value
+    if(not isinstance(fps, int)):fps = fps.value
     cap = init_cap(cap_ind, width, height, fps)
     print("mp_cap_worker Process:" + str(os.getpid()) + " cap_ind:" + str(cap_ind))
     while(cap.isOpened()):
         ret, frame = cap.read()
         if(ret):
             if(cv_size(frame) != (width,height)):
-                frame = imutils.resize(frame, width=width, height=height)
-            q.put(frame)
+                frame = cv2.resize(frame, (width, height), interpolation=cv2.INTER_AREA)
+            if(mode == "rgb"):frame = frame[...,::-1]
+            #[...,::-1] switch b and r at image (numpy operation [start:end:step])
+            r = {'id':cap_ind,'img':frame}
+            q.put(r)
             cv2.waitKey(10)
 
 def test_cap(width,height,fps,cap_num,demo = False):
@@ -59,7 +76,7 @@ def test_cap(width,height,fps,cap_num,demo = False):
             ret, frame = cap_1.read()
             if(ret):
                 if(cv_size(frame) != (width,height)):
-                    frame = imutils.resize(frame, width=width, height=height)
+                    frame = cv2.resize(frame, (width, height), interpolation=cv2.INTER_AREA)
                 cv2.putText(frame, "Camera:" + str(cap_ind1), (10,40), cv2.FONT_HERSHEY_SIMPLEX, 1.2, (0,255,0), 2)
                 cv2.imshow("Capture", frame)
                 key = cv2.waitKey(1)
@@ -87,18 +104,23 @@ def test_cap(width,height,fps,cap_num,demo = False):
         
         while (True):
             FPS_count_start_time = time.time()
+            count_fps = False
+            if(imgq1.qsize() > 0 and imgq2.qsize() > 0):
+                count_fps = True
+            
             show_frame = False
             if(imgq1.qsize() > 0 or imgq2.qsize() > 0):
                 show_frame = True
+            
 
             if(imgq1.qsize() > 0):
                 detect_time_start = time.time()
-                img1 = imgq1.get()
+                img1 = imgq1.get()['img']
             else:
                 cv2.putText(img1, "X", (10,40), cv2.FONT_HERSHEY_SIMPLEX, 1.2, (0,0,255), 2)
 
             if(imgq2.qsize() > 0):
-                img2 = imgq2.get()
+                img2 = imgq2.get()['img']
             else:
                 cv2.putText(img2, "X", (10,40), cv2.FONT_HERSHEY_SIMPLEX, 1.2, (0,0,255), 2)
             
@@ -110,6 +132,7 @@ def test_cap(width,height,fps,cap_num,demo = False):
                 if(demo):print("img1.shape:" + str(img1.shape) + " img2.shape:" + str(img2.shape))
                 if(demo):print("frame.shape:" + str(frame.shape))
                 cv2.imshow("Capture", frame)
+                if(count_fps):print("FPS:" + str(round(1 / (time.time() - FPS_count_start_time), 1)))
             if(demo):print("imgq1.qsize():" + str(imgq1.qsize()) + " imgq2.qsize():" + str(imgq2.qsize()))
             key = cv2.waitKey(1)
             if(key == ord('q')):
@@ -152,4 +175,4 @@ if __name__ == "__main__":
         cap_num = 2
 
     print("Test " + str(cap_num) + " Capture on " + str(x) + " x " + str(y) + " with FPS:" + str(fps))
-    test_cap(x,y,fps,cap_num,True)
+    test_cap(x,y,fps,cap_num,demo = True)
