@@ -18,6 +18,7 @@ class Main:
         self.dn_height = mp.Manager().Value('i', 416)
 
     def roiDrawBoxes(self, detections, img, top = 0.1, bot = 0.1):
+        #it's BGR in opencv
         red = (0, 0, 255)
         green = (0, 255, 0)
         color = (0, 0, 0)
