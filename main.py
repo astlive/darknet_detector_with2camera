@@ -1,217 +1,177 @@
-import darknet
-import numpy as np
+import capture_func as cf
 import multiprocessing as mp
+import darknet
 import time
+import cv2
+import numpy as np
+import os
 
-###config###
-thresh = 0.5
-configPath = "./cfgs/yolov3_hr_c13.cfg"
-# configPath = "./cfgs/csresnext50-panet-spp-original-optimal.cfg"
-weightPath = "./cfgs/yolov3_hr_c13_best.weights"
-metaPath = "./cfgs/obj.data"
-fps_skip = 1
-###config-end###
+class Main:
+    def __init__(self, darknetarg):
+        self.darknetarg = darknetarg
+        self.cap_ind1 = None
+        self.cap_ind2 = None
+        self.imgs = mp.Manager().Queue()
+        self.imgds = mp.Manager().Queue()
+        self.imgbs = mp.Manager().Queue()
+        self.detector_ready = mp.Manager().Value('i', False)
+        self.dn_width = mp.Manager().Value('i', 416)
+        self.dn_height = mp.Manager().Value('i', 416)
 
-def set_res(cap, x,y):
-    import cv2
-    cap.set(cv2.CAP_PROP_FRAME_WIDTH, int(x))
-    cap.set(cv2.CAP_PROP_FRAME_HEIGHT, int(y))
-    return str(cap.get(cv2.CAP_PROP_FRAME_WIDTH)),str(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+    def roiDrawBoxes(self, detections, img, top = 0.1, bot = 0.1):
+        #it's BGR in opencv
+        red = (255, 0, 0)
+        green = (0, 255, 0)
+        color = (0, 0, 0)
+        min_y = round(img.shape[0] * 0.1, 0)
+        max_y = round(img.shape[0] * 0.9, 0)
+        msg = ""
 
-def cam_check(cam):
-    import cv2
-    cap = cv2.VideoCapture(cam, cv2.CAP_DSHOW)
-    frame_count = 0
-    if(cap is None or not cap.isOpened()):
-        return False
-    size = set_res(cap, 640,480)
-    key = ''
-    print("Camera:" + str(cam) + " Size:" + str(size))
-    while(True):
-        ret, frame = cap.read()
-        cv2.imshow("Camera:" + str(cam) + " Press \'Y\' to Select or Press \'N\' to ignore", frame)
-        key = cv2.waitKey(1) & 0xFF
-        if(key == ord('Y') or key == ord('N')):
-            break
-    cap.release()
-    cv2.destroyAllWindows()
-    if(key == ord('Y')):
-        return True
-    return False
+        for detection in detections:
+            x, y, w, h = detection[2][0],\
+                detection[2][1],\
+                detection[2][2],\
+                detection[2][3]
+            xmin, ymin, xmax, ymax = cf.convertBack(
+                float(x), float(y), float(w), float(h))
+            pt1 = (xmin, ymin)
+            pt2 = (xmax, ymax)
 
-def cap_select():
-    import cv2
-    cam_left_num = -1
-    cam_right_num = -1
-    print("Select Camera Left(1-10):")
-    for cam_num in range(1,10):
-        cam_sel = cam_check(cam_num)
-        if(cam_sel == True):
-            cam_left_num = cam_num
-            print("Select " + str(cam_left_num) + " As Camera Left(<<)")
-            break
-    if(cam_left_num == -1):
-        print("Camera Left Not Available")
+            if("break" in detection[0] and ymin >= min_y and ymax <= max_y):
+                color = red
+                msg = "brk"
+                cv2.rectangle(img, pt1, pt2, (0, 255, 0), 1)
+                cv2.putText(img,
+                            detection[0] +
+                            " [" + str(round(detection[1] * 100, 2)) + "]",
+                            (pt1[0], pt1[1] - 5), cv2.FONT_HERSHEY_SIMPLEX, 0.5,
+                            color, 2)
+            else:
+                color = green
+                #if there has other class do here.
+        return msg, img
 
-    print("Select Camera Right(1-10):")
-    for cam_num in range(1,10):
-        if(cam_num == cam_left_num):
-            continue
-        cam_sel = cam_check(cam_num)
-        if(cam_sel == True):
-            cam_right_num = cam_num
-            print("Select " + str(cam_right_num) + " As Camera Right(>>)")
-            break
-    if(cam_right_num == -1):
-        print("Camera Right Not Available")
-    return cam_left_num, cam_right_num
+    def detector(self, debug = False):
+        darknet.performDetect(thresh=self.darknetarg['thresh'], configPath=self.darknetarg['configPath'], 
+                            weightPath=self.darknetarg['weightPath'], metaPath=self.darknetarg['metaPath'],
+                            initOnly=True)
+        self.dn_width.value = darknet.network_width(darknet.netMain)
+        self.dn_height.value = darknet.network_height(darknet.netMain)
+        darknet_image = darknet.make_image(self.dn_width.value, self.dn_height.value, 3)
+        self.detector_ready.value = True
 
-def bgr2rgb_resized(img , network_width, network_height):
-    import cv2
-    frame_rgb = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
-    frame_resized = cv2.resize(frame_rgb, (network_width, network_height), interpolation=cv2.INTER_LINEAR)
-    return frame_resized
+        while True:
+            if(self.imgs.empty()):
+                time.sleep(1)
+                if(debug):print("imgs queue is empty sleep 1s")
+            else:
+                fps_count_start_time = time.time()
+                job = self.imgs.get(False)
+                if(debug):print("job-->job[id] = " + str(job['id'] + " , job['img.shape']" + str(job['img'].shape)))
+                darknet.copy_image_from_bytes(darknet_image, job['img'].tobytes())
+                detections = darknet.detect_image(net = darknet.netMain, meta = darknet.metaMain, im = darknet_image)
+                #move drawboxes to monitor() thread to improve performance(maybe?)
+                job['detections'] = detections
+                self.imgds.put(job)
+                if(debug):print("detector FPS:" + str(round(1 / (time.time() - fps_count_start_time), 1)))
 
-def convertBack(x, y, w, h):
-    xmin = int(round(x - (w / 2)))
-    xmax = int(round(x + (w / 2)))
-    ymin = int(round(y - (h / 2)))
-    ymax = int(round(y + (h / 2)))
-    return xmin, ymin, xmax, ymax
+    def mergeframe(self, img1, img2, img3):
+        frame = np.hstack((img1, img2))
+        frame = np.hstack((frame, img3))
+        return frame
 
-def cvDrawBoxes(detections, img):
-    import cv2
-    red = (255, 0, 0)
-    green = (0, 255, 0)
-    color = (0, 0, 0)
-    for detection in detections:
-        if("break" in detection[0]):
-            color = red
+    def monitor(self, debug = True):
+        no_signal_img = cv2.resize(cv2.imread("./demo/no_signal.png"), dsize=(self.dn_width.value, self.dn_height.value))
+        img1 = no_signal_img
+        img2 = no_signal_img
+        imgb = no_signal_img
+        cv2.namedWindow("Monitor")
+        frame = self.mergeframe(img1, img2, imgb)
+        cv2.imshow("Monitor", frame)
+        msgRead = True
+        save_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "saves")
+
+        while True:
+            fps_count_start_time = time.time()
+            u_frame = False
+            if(not self.imgds.empty()):
+                u_frame = True
+                img = self.imgds.get(False)
+                msg, img['img'] = self.roiDrawBoxes(img['detections'], img['img'])
+                if(msg != ""):
+                    time_str = time.strftime("%Y-%m-%d %H%M%S", time.localtime())
+                    img['time'] = time_str
+                    img['img'] = cf.draw_msg(img['img'], time_str, img['id'])
+                    self.imgbs.put(img)
+                if(img['id'] == self.cap_ind1):img1 = img['img'][...,::-1]
+                elif(img['id'] == self.cap_ind2):img2 = img['img'][...,::-1]
+            if(not self.imgbs.empty() and msgRead):
+                u_frame = True
+                bimg = self.imgbs.get(False)
+                imgb = bimg['img'][...,::-1]
+                msgRead = False
+            if(u_frame):
+                frame = self.mergeframe(img1, img2, imgb)
+                cv2.imshow("Monitor", frame)
+                if(debug):print("imgs.qsize():" + str(self.imgs.qsize()) + " imgds.qsize():" + str(self.imgds.qsize())
+                        + " imgbs.qsize():" + str(self.imgbs.qsize())
+                        + " frame update FPS:" + str(round(1 / (time.time() - fps_count_start_time), 1)))
+            key = cv2.waitKey(1)
+            if(key == ord('q')):
+                break
+            elif(key == ord('p')):
+                key = cv2.waitKey(0)
+            elif(key == ord('Y') or key == ord('y')):
+                if(not msgRead):
+                    msgRead = True
+                    f_path = os.path.join(save_path, bimg['time'] + ".jpg")
+                    if(os.path.isfile(f_path)):
+                        for i in range(100):
+                            f_path = os.path.splitext(f_path)[0] + "-" + str(i) + ".jpg"
+                            if(not os.path.isfile(f_path)):
+                                break
+                    cv2.imwrite(f_path, imgb)
+                    if(self.imgbs.empty()):
+                        imgb = no_signal_img
+            elif(key == ord('N') or key == ord('n')):
+                if(not msgRead):
+                    msgRead = True
+                    if(self.imgbs.empty()):
+                        imgb = no_signal_img
+
+    def run(self, demo = True):
+        mpdarknet = mp.Process(target=self.detector)
+        mpdarknet.start()
+
+        while self.detector_ready.value == False:
+            print("Waiting for detector ready...re-check after 10s")
+            time.sleep(10)
+
+        if(demo):
+            self.cap_ind1 = "./demo/gopro8(1).MP4"
+            self.cap_ind2 = "./demo/gopro8(2).MP4"
         else:
-            color = green
-        x, y, w, h = detection[2][0],\
-            detection[2][1],\
-            detection[2][2],\
-            detection[2][3]
-        xmin, ymin, xmax, ymax = convertBack(
-            float(x), float(y), float(w), float(h))
-        pt1 = (xmin, ymin)
-        pt2 = (xmax, ymax)
-        cv2.rectangle(img, pt1, pt2, (0, 255, 0), 1)
-        cv2.putText(img,
-                    detection[0] +
-                    " [" + str(round(detection[1] * 100, 2)) + "]",
-                    (pt1[0], pt1[1] - 5), cv2.FONT_HERSHEY_SIMPLEX, 0.5,
-                    color, 2)
-    return img
+            self.cap_ind1 = cf.sel_cap()
+            self.cap_ind2 = cf.sel_cap(cap_ind1)
+        mpcap1 = mp.Process(target=cf.mp_cap_worker, args=(self.cap_ind1, self.dn_width,
+                            self.dn_height, 60, self.imgs, "rgb",))
+        mpcap2 = mp.Process(target=cf.mp_cap_worker, args=(self.cap_ind2, self.dn_width,
+                            self.dn_height, 60, self.imgs, "rgb",))
+        mpcap1.start()
+        mpcap2.start()
+        mpmon = mp.Process(target=self.monitor)
+        mpmon.start()
 
-def cap_worker(cap_num, q, network_width, network_height, cap_diff, cap_speed):
-    import cv2
-    print("cap_worker START at cap:" + str(cap_num))
-    count = 0
-    cap = None
-    #ifdemo
-    if(isinstance(cap_num, str)):
-        cap = cv2.VideoCapture(cap_num)
-    else:
-        cap = cv2.VideoCapture(cap_num)
-        set_res(cap, 1280,720)
-        cap.set(cv2.CAP_PROP_FPS, 60)
-    while(cap.isOpened()):
-        pre_time = time.time()
-        ret, img = cap.read()
-        if(ret):
-            q.put(bgr2rgb_resized(img, network_width, network_height))
-            print("camera time taken:" + str(round(time.time() - pre_time, 2)) + "s")
-            cv2.waitKey(round(cap_speed.value*cap_diff.value*1000))
+        mpmon.join()
+        mpdarknet.terminate()
+        mpcap1.terminate()
+        mpcap2.terminate()
 
-def do_detect(cap1_num, cap2_num):
-    #load net
-    darknet.performDetect(thresh=thresh, configPath=configPath, weightPath=weightPath, metaPath=metaPath, initOnly=True)
-    network_width = darknet.network_width(darknet.netMain)
-    network_height = darknet.network_height(darknet.netMain)
-    #Create an image we reuse for each detect
-    darknet_image = darknet.make_image(darknet.network_width(darknet.netMain), darknet.network_height(darknet.netMain),3)
-
-    #init Queue and timediff
-    imgq1 = mp.Manager().Queue()
-    imgq2 = mp.Manager().Queue()
-    cap_diff = mp.Value('d', 0.0)
-    cap_speed = mp.Value('d', 1.5)
-
-    #init cap_worker
-    print("network_height:" + str(network_height) + " network_width:" + str(network_width))
-    w1 = mp.Process(target=cap_worker,args=(cap1_num,imgq1,network_width,network_height,cap_diff,cap_speed,))
-    w2 = mp.Process(target=cap_worker,args=(cap2_num,imgq2,network_width,network_height,cap_diff,cap_speed,))
-    w1.start()
-    w2.start()
-
-    #init windows
-    import cv2
-    cv2.namedWindow('Capture', cv2.WINDOW_NORMAL)
-    cv2.resizeWindow('Capture', network_width*2, network_height)
-    #load a no_signal image
-    no_signal_img = cv2.imread("./demo/no_signal.png")
-    img1 = no_signal_img
-    img2 = no_signal_img
-    cv2.imshow("Capture", np.hstack((img1, img2)))
-
-    while (True):
-        FPS_count_start_time = time.time()
-        Count_FPS = False
-        if(imgq1.qsize() > 0 or imgq2.qsize() > 0):
-            Count_FPS = True
-
-        if(imgq1.qsize() > 0):
-            detect_time_start = time.time()
-            img1 = imgq1.get()
-            darknet.copy_image_from_bytes(darknet_image, img1.tobytes())
-            res1 = darknet.detect_image(net = darknet.netMain, meta = darknet.metaMain, im = darknet_image)
-            img1 = cvDrawBoxes(res1, img1)
-            img1 = cv2.cvtColor(img1, cv2.COLOR_BGR2RGB)
-            cap_diff.value = round((time.time() - detect_time_start), 3)
-            print("detect_time:" + str(cap_diff.value))
-
-        if(imgq2.qsize() > 0):
-            img2 = imgq2.get()
-            darknet.copy_image_from_bytes(darknet_image, img2.tobytes())
-            res2 = darknet.detect_image(net = darknet.netMain, meta = darknet.metaMain, im = darknet_image)
-            img2 = cvDrawBoxes(res2, img2)
-            img2 = cv2.cvtColor(img2, cv2.COLOR_BGR2RGB)
-        
-        if(Count_FPS):
-            dis_rr_time = time.time()
-            if(img1.shape != img2.shape):
-                img1 = cv2.resize(img1, dsize=(960,540))
-                img2 = cv2.resize(img2, dsize=(960,540))
-            cv2.imshow("Capture", np.hstack((img1, img2)))
-            print("FPS:" + str(round(1 / (time.time()-FPS_count_start_time), 1)))
-            print("display result time taken:" + str(round(time.time() - dis_rr_time, 2)) + "s")
-            if(imgq1.qsize() > 2 or imgq2.qsize() > 2):
-                cap_speed.value = cap_speed.value + 0.001
-                print("decrease cap_speed:" + str(round(cap_speed.value, 3)))
-        else:
-            if(cap_speed.value > 1):
-                cap_speed.value = cap_speed.value - 0.001
-                print("increase cap_speed:" + str(round(cap_speed.value, 3)))
-        print("imgq1.qsize():" + str(imgq1.qsize()) + " imgq2.qsize():" + str(imgq2.qsize()))
-        key = cv2.waitKey(1)
-        if(key == ord('q')):
-            break
-        elif(key == ord('p')):
-            key = cv2.waitKey(0)
-    w1.terminate()
-    w2.terminate()
-
-if __name__ == '__main__':
-    #demo mode switch
-    demo = True
-    cam_left_num = None
-    cam_right_num = None
-    if(demo is not True):
-        cam_left_num, cam_right_num = cap_select()
-    else:
-        cam_left_num = "./demo/gopro8(1).MP4"
-        cam_right_num = "./demo/gopro8(2).MP4"
-    
-    do_detect(cam_left_num, cam_right_num)
+if __name__ == "__main__":
+    thresh = 0.5
+    configPath = "./cfgs/model_1/csresnext50-panet-spp-original-optimal.cfg"
+    weightPath = "./cfgs/model_1/csresnext50-panet-spp-original-optimal_best.weights"
+    metaPath = "./cfgs/model_1/obj.data"
+    darknetarg = {'thresh':thresh, 'configPath':configPath, 'weightPath':weightPath, 'metaPath':metaPath}
+    main = Main(darknetarg = darknetarg)
+    main.run()
