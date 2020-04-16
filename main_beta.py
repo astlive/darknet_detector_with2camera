@@ -4,6 +4,7 @@ import darknet
 import time
 import cv2
 import numpy as np
+import os
 
 class Main:
     def __init__(self, darknetarg):
@@ -19,7 +20,7 @@ class Main:
 
     def roiDrawBoxes(self, detections, img, top = 0.1, bot = 0.1):
         #it's BGR in opencv
-        red = (0, 0, 255)
+        red = (255, 0, 0)
         green = (0, 255, 0)
         color = (0, 0, 0)
         min_y = round(img.shape[0] * 0.1, 0)
@@ -39,18 +40,18 @@ class Main:
             if("break" in detection[0] and ymin >= min_y and ymax <= max_y):
                 color = red
                 msg = "brk"
+                cv2.rectangle(img, pt1, pt2, (0, 255, 0), 1)
+                cv2.putText(img,
+                            detection[0] +
+                            " [" + str(round(detection[1] * 100, 2)) + "]",
+                            (pt1[0], pt1[1] - 5), cv2.FONT_HERSHEY_SIMPLEX, 0.5,
+                            color, 2)
             else:
                 color = green
-            
-            cv2.rectangle(img, pt1, pt2, (0, 255, 0), 1)
-            cv2.putText(img,
-                        detection[0] +
-                        " [" + str(round(detection[1] * 100, 2)) + "]",
-                        (pt1[0], pt1[1] - 5), cv2.FONT_HERSHEY_SIMPLEX, 0.5,
-                        color, 2)
+                #if there has other class do here.
         return msg, img
 
-    def detector(self, debug = True):
+    def detector(self, debug = False):
         darknet.performDetect(thresh=self.darknetarg['thresh'], configPath=self.darknetarg['configPath'], 
                             weightPath=self.darknetarg['weightPath'], metaPath=self.darknetarg['metaPath'],
                             initOnly=True)
@@ -69,11 +70,6 @@ class Main:
                 if(debug):print("job-->job[id] = " + str(job['id'] + " , job['img.shape']" + str(job['img'].shape)))
                 darknet.copy_image_from_bytes(darknet_image, job['img'].tobytes())
                 detections = darknet.detect_image(net = darknet.netMain, meta = darknet.metaMain, im = darknet_image)
-                # msg, job['img'] = self.roiDrawBoxes(detections, job['img'])
-                # self.imgds.put(job)
-                # if(msg != ""):
-                #     self.imgbs.put(job)
-
                 #move drawboxes to monitor() thread to improve performance(maybe?)
                 job['detections'] = detections
                 self.imgds.put(job)
@@ -92,6 +88,8 @@ class Main:
         cv2.namedWindow("Monitor")
         frame = self.mergeframe(img1, img2, imgb)
         cv2.imshow("Monitor", frame)
+        msgRead = True
+        save_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "saves")
 
         while True:
             fps_count_start_time = time.time()
@@ -100,16 +98,20 @@ class Main:
                 u_frame = True
                 img = self.imgds.get(False)
                 msg, img['img'] = self.roiDrawBoxes(img['detections'], img['img'])
-                if(img['id'] == self.cap_ind1):img1 = img['img']
-                elif(img['id'] == self.cap_ind2):img2 = img['img']
-                if(self.imgds.qsize() > 1):
-                    #if gpu too slow remove this if function
-                    img = self.imgds.get(False)
-                    msg, img['img'] = self.roiDrawBoxes(img['detections'], img['img'])
-                    if(img['id'] == self.cap_ind1):img1 = img['img']
-                    elif(img['id'] == self.cap_ind2):img2 = img['img']
+                if(msg != ""):
+                    time_str = time.strftime("%Y-%m-%d %H%M%S", time.localtime())
+                    img['time'] = time_str
+                    img['img'] = cf.draw_msg(img['img'], time_str, img['id'])
+                    self.imgbs.put(img)
+                if(img['id'] == self.cap_ind1):img1 = img['img'][...,::-1]
+                elif(img['id'] == self.cap_ind2):img2 = img['img'][...,::-1]
+            if(not self.imgbs.empty() and msgRead):
+                u_frame = True
+                bimg = self.imgbs.get(False)
+                imgb = bimg['img'][...,::-1]
+                msgRead = False
             if(u_frame):
-                frame = self.mergeframe(img1[...,::-1], img2[...,::-1], imgb)
+                frame = self.mergeframe(img1, img2, imgb)
                 cv2.imshow("Monitor", frame)
                 if(debug):print("imgs.qsize():" + str(self.imgs.qsize()) + " imgds.qsize():" + str(self.imgds.qsize())
                         + " imgbs.qsize():" + str(self.imgbs.qsize())
@@ -119,6 +121,23 @@ class Main:
                 break
             elif(key == ord('p')):
                 key = cv2.waitKey(0)
+            elif(key == ord('Y') or key == ord('y')):
+                if(not msgRead):
+                    msgRead = True
+                    f_path = os.path.join(save_path, bimg['time'] + ".jpg")
+                    if(os.path.isfile(f_path)):
+                        for i in range(100):
+                            f_path = os.path.splitext(f_path)[0] + "-" + str(i) + ".jpg"
+                            if(not os.path.isfile(f_path)):
+                                break
+                    cv2.imwrite(f_path, imgb)
+                    if(self.imgbs.empty()):
+                        imgb = no_signal_img
+            elif(key == ord('N') or key == ord('n')):
+                if(not msgRead):
+                    msgRead = True
+                    if(self.imgbs.empty()):
+                        imgb = no_signal_img
 
     def run(self, demo = True):
         mpdarknet = mp.Process(target=self.detector)

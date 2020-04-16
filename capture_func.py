@@ -6,6 +6,11 @@ import numpy as np
 def cv_size(img):
     return tuple(img.shape[1::-1])
 
+def draw_msg(img, str1, str2, color1 = (0,255,0), color2 = (0,0,255)):
+    cv2.putText(img, str1, (10,40), cv2.FONT_HERSHEY_SIMPLEX, 1.2, color1, 2)
+    cv2.putText(img, str2, (10,80), cv2.FONT_HERSHEY_SIMPLEX, 1.2, color2, 2)
+    return img
+
 def convertBack(x, y, w, h):
     xmin = int(round(x - (w / 2)))
     xmax = int(round(x + (w / 2)))
