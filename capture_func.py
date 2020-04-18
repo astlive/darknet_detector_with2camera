@@ -18,8 +18,8 @@ def convertBack(x, y, w, h):
     ymax = int(round(y + (h / 2)))
     return xmin, ymin, xmax, ymax
 
-def init_cap(cap_index, width, height, fps, debug = True):
-    if(debug):print("init_cap args-->cap_index:" + str(cap_index) + " width:" + str(width) + " height:"
+def init_cap(cap_index, width, height, fps, debug = False):
+    if(debug):print("Try init_cap args-->cap_index:" + str(cap_index) + " width:" + str(width) + " height:"
                 + str(height) + " fps:" + str(fps))
     if(not isinstance(width, int)):width = width.value
     if(not isinstance(height, int)):height = height.value
@@ -29,7 +29,6 @@ def init_cap(cap_index, width, height, fps, debug = True):
     cap.set(cv2.CAP_PROP_FRAME_WIDTH, width)
     cap.set(cv2.CAP_PROP_FRAME_HEIGHT, height)
     cap.set(cv2.CAP_PROP_FPS, fps)
-    print("init VideoCapture on width:" + str(cap.get(cv2.CAP_PROP_FRAME_WIDTH)) + " height:" + str(cap.get(cv2.CAP_PROP_FRAME_HEIGHT)), " fps:" + str(cap.get(cv2.CAP_PROP_FPS)))
     return cap
 
 def sel_cap(skip = -1):
@@ -49,15 +48,16 @@ def sel_cap(skip = -1):
                     break
         cap.release()
         cv2.destroyAllWindows()
-    return None
+    return -1
 
 def mp_cap_worker(cap_ind, width, height, fps, q, mode="bgr"):
     import cv2
     if(not isinstance(width, int)):width = width.value
     if(not isinstance(height, int)):height = height.value
     if(not isinstance(fps, int)):fps = fps.value
-    cap = init_cap(cap_ind, width, height, fps)
     print("mp_cap_worker Process:" + str(os.getpid()) + " cap_ind:" + str(cap_ind))
+    cap = init_cap(cap_ind, width, height, fps)
+    print("initalized VideoCapture --> width:" + str(cap.get(cv2.CAP_PROP_FRAME_WIDTH)) + " height:" + str(cap.get(cv2.CAP_PROP_FRAME_HEIGHT)), " fps:" + str(cap.get(cv2.CAP_PROP_FPS)))
     while(cap.isOpened()):
         ret, frame = cap.read()
         if(ret):

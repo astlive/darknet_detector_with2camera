@@ -51,7 +51,10 @@ class Main:
                 #if there has other class do here.
         return msg, img
 
-    def detector(self, debug = False):
+    def detector(self, skip = 2, debug = False):
+        #for normal pc set skip = 2, Hight-End pc set skip = 1
+        #7700hq+1060MaxQ 18fps on detector
+        #2700x+2080ti 50fps on detector
         darknet.performDetect(thresh=self.darknetarg['thresh'], configPath=self.darknetarg['configPath'], 
                             weightPath=self.darknetarg['weightPath'], metaPath=self.darknetarg['metaPath'],
                             initOnly=True)
@@ -59,6 +62,7 @@ class Main:
         self.dn_height.value = darknet.network_height(darknet.netMain)
         darknet_image = darknet.make_image(self.dn_width.value, self.dn_height.value, 3)
         self.detector_ready.value = True
+        skip_count = 0
 
         while True:
             if(self.imgs.empty()):
@@ -67,11 +71,17 @@ class Main:
             else:
                 fps_count_start_time = time.time()
                 job = self.imgs.get(False)
-                if(debug):print("job-->job[id] = " + str(job['id'] + " , job['img.shape']" + str(job['img'].shape)))
-                darknet.copy_image_from_bytes(darknet_image, job['img'].tobytes())
-                detections = darknet.detect_image(net = darknet.netMain, meta = darknet.metaMain, im = darknet_image)
-                #move drawboxes to monitor() thread to improve performance(maybe?)
-                job['detections'] = detections
+                skip_count = skip_count + 1
+                if(skip_count % skip == 0):
+                    if(debug):print("job-->job[id] = " + str(job['id']) + " , job['img.shape']" + str(job['img'].shape))
+                    darknet.copy_image_from_bytes(darknet_image, job['img'].tobytes())
+                    detections = darknet.detect_image(net = darknet.netMain, meta = darknet.metaMain, im = darknet_image)
+                    #move drawboxes to monitor() thread to improve performance(maybe?)
+                    job['detections'] = detections
+                    if(debug):print(detections)
+                else:
+                    if(debug):print("skip frame " + str(skip_count))
+                    job['detections'] = []
                 self.imgds.put(job)
                 if(debug):print("detector FPS:" + str(round(1 / (time.time() - fps_count_start_time), 1)))
 
@@ -80,7 +90,7 @@ class Main:
         frame = np.hstack((frame, img3))
         return frame
 
-    def monitor(self, debug = True):
+    def monitor(self, debug = False):
         no_signal_img = cv2.resize(cv2.imread("./demo/no_signal.png"), dsize=(self.dn_width.value, self.dn_height.value))
         img1 = no_signal_img
         img2 = no_signal_img
@@ -139,7 +149,7 @@ class Main:
                     if(self.imgbs.empty()):
                         imgb = no_signal_img
 
-    def run(self, demo = True):
+    def run(self, demo = False, debug = True):
         mpdarknet = mp.Process(target=self.detector)
         mpdarknet.start()
 
@@ -152,13 +162,17 @@ class Main:
             self.cap_ind2 = "./demo/gopro8(2).MP4"
         else:
             self.cap_ind1 = cf.sel_cap()
-            self.cap_ind2 = cf.sel_cap(cap_ind1)
-        mpcap1 = mp.Process(target=cf.mp_cap_worker, args=(self.cap_ind1, self.dn_width,
+            if(debug):print("self.cap_ind1:" + str(self.cap_ind1))
+            self.cap_ind2 = cf.sel_cap(skip = self.cap_ind1)
+            if(debug):print("self.cap_ind2:" + str(self.cap_ind2))
+        if(self.cap_ind1 is not None and self.cap_ind1 != -1):
+            mpcap1 = mp.Process(target=cf.mp_cap_worker, args=(self.cap_ind1, self.dn_width,
                             self.dn_height, 60, self.imgs, "rgb",))
-        mpcap2 = mp.Process(target=cf.mp_cap_worker, args=(self.cap_ind2, self.dn_width,
+            mpcap1.start()
+        if(self.cap_ind2 is not None and self.cap_ind2 != -1):
+            mpcap2 = mp.Process(target=cf.mp_cap_worker, args=(self.cap_ind2, self.dn_width,
                             self.dn_height, 60, self.imgs, "rgb",))
-        mpcap1.start()
-        mpcap2.start()
+            mpcap2.start()
         mpmon = mp.Process(target=self.monitor)
         mpmon.start()
 
