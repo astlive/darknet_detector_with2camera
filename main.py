@@ -83,14 +83,17 @@ class Main:
                     if(debug):print("skip frame " + str(skip_count))
                     job['detections'] = []
                 self.imgds.put(job)
-                if(debug):print("detector FPS:" + str(round(1 / (time.time() - fps_count_start_time), 1)))
+                try:
+                    if(debug):print("detector FPS:" + str(round(1 / (time.time() - fps_count_start_time), 1)))
+                except ZeroDivisionError:
+                    print("ZeroDivisionError ERROR!")
 
     def mergeframe(self, img1, img2, img3):
         frame = np.hstack((img1, img2))
         frame = np.hstack((frame, img3))
         return frame
 
-    def monitor(self, debug = False):
+    def monitor(self, debug = True):
         no_signal_img = cv2.resize(cv2.imread("./demo/no_signal.png"), dsize=(self.dn_width.value, self.dn_height.value))
         img1 = no_signal_img
         img2 = no_signal_img
@@ -123,9 +126,14 @@ class Main:
             if(u_frame):
                 frame = self.mergeframe(img1, img2, imgb)
                 cv2.imshow("Monitor", frame)
-                if(debug):print("imgs.qsize():" + str(self.imgs.qsize()) + " imgds.qsize():" + str(self.imgds.qsize())
-                        + " imgbs.qsize():" + str(self.imgbs.qsize())
-                        + " frame update FPS:" + str(round(1 / (time.time() - fps_count_start_time), 1)))
+                if(debug):
+                    try:
+                        print("imgs.qsize():" + str(self.imgs.qsize()) + " imgds.qsize():" + str(self.imgds.qsize())
+                            + " imgbs.qsize():" + str(self.imgbs.qsize())
+                            + " frame update FPS:" + str(round(1 / (time.time() - fps_count_start_time), 1)))
+                    except ZeroDivisionError:
+                        print("ZeroDivisionError ERROR!")
+
             key = cv2.waitKey(1)
             if(key == ord('q')):
                 break
@@ -149,7 +157,7 @@ class Main:
                     if(self.imgbs.empty()):
                         imgb = no_signal_img
 
-    def run(self, demo = False, debug = True):
+    def run(self, demo = True, debug = True):
         mpdarknet = mp.Process(target=self.detector)
         mpdarknet.start()
 
