@@ -51,7 +51,7 @@ class Main:
                 #if there has other class do here.
         return msg, img
 
-    def detector(self, skip = 2, debug = False):
+    def detector(self, skip = 1, debug = False):
         #for normal pc set skip = 2, Hight-End pc set skip = 1
         #7700hq+1060MaxQ 18fps on detector
         #2700x+2080ti 50fps on detector
@@ -145,8 +145,9 @@ class Main:
                     f_path = os.path.join(save_path, bimg['time'] + ".jpg")
                     if(os.path.isfile(f_path)):
                         for i in range(100):
-                            f_path = os.path.splitext(f_path)[0] + "-" + str(i) + ".jpg"
-                            if(not os.path.isfile(f_path)):
+                            n_path = os.path.splitext(f_path)[0] + "-" + str(i) + ".jpg"
+                            if(not os.path.isfile(n_path)):
+                                f_path = n_path
                                 break
                     cv2.imwrite(f_path, imgb)
                     if(self.imgbs.empty()):
@@ -166,8 +167,14 @@ class Main:
             time.sleep(10)
 
         if(demo):
-            self.cap_ind1 = "./demo/gopro8(1).MP4"
-            self.cap_ind2 = "./demo/gopro8(2).MP4"
+            # self.cap_ind1 = "./demo/gopro8(1).MP4"
+            # self.cap_ind2 = "./demo/gopro8(2).MP4"
+            # self.cap_ind1 = "./demo/gopro8(3).MP4"
+            # self.cap_ind2 = "./demo/gopro8(4).MP4"
+            self.cap_ind1 = "./demo/gopro7(1).MP4"
+            # self.cap_ind2 = "./demo/gopro7(2).MP4"
+            # self.cap_ind1 = "./demo/gopro7(3).MP4"
+            # self.cap_ind2 = "./demo/gopro7(4).MP4"
         else:
             self.cap_ind1 = cf.sel_cap()
             if(debug):print("self.cap_ind1:" + str(self.cap_ind1))
@@ -191,9 +198,12 @@ class Main:
 
 if __name__ == "__main__":
     thresh = 0.5
-    configPath = "./cfgs/model_1/csresnext50-panet-spp-original-optimal.cfg"
-    weightPath = "./cfgs/model_1/csresnext50-panet-spp-original-optimal_best.weights"
-    metaPath = "./cfgs/model_1/obj.data"
+    # configPath = "./cfgs/model_1/csresnext50-panet-spp-original-optimal.cfg"
+    # weightPath = "./cfgs/model_1/csresnext50-panet-spp-original-optimal_best.weights"
+    # metaPath = "./cfgs/model_1/obj.data"
+    configPath = "./cfgs/model_2/yolov4-tra_416.cfg"
+    weightPath = "./cfgs/model_2/yolov4-tra_320_best.weights"
+    metaPath = "./cfgs/model_2/obj.data"
     darknetarg = {'thresh':thresh, 'configPath':configPath, 'weightPath':weightPath, 'metaPath':metaPath}
     main = Main(darknetarg = darknetarg)
     main.run()
