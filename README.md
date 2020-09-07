@@ -1,4 +1,3 @@
-# some-darknet-shit-mini
 Here we go again
 
 You should make yourown dlls and modify the setting.
